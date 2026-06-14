@@ -1,6 +1,6 @@
 {
   "name": "personal-space",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "scripts": {
     "dev": "webpack serve",
     "build": "webpack --mode production",
