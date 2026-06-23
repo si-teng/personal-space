@@ -1,22 +1,33 @@
 import { motion } from 'framer-motion';
-import { Quote, Image, BookHeart, Package, ArrowRight, Camera, Check, X, Download, Upload } from 'lucide-react';
-import { Link } from 'react-router-dom';
+import { Quote, Image, BookHeart, Package, Camera, Check, X, ImageOff } from 'lucide-react';
+import { Link, useNavigate } from 'react-router-dom';
 import { useEffect, useState, useRef } from 'react';
 import { storage } from '../utils/storage';
 import { imageManager } from '../utils/imageManager';
-import { dataExporter } from '../utils/dataExporter';
-import { dataImporter } from '../utils/dataImporter';
-import type { UserProfile, Quote as QuoteType } from '../types';
+import type { UserProfile, Quote as QuoteType, GalleryItem } from '../types';
 import { STORAGE_KEYS } from '../types';
+import { ImageViewer } from '../components/ImageViewer';
 
 const modules = [
-  { id: 'quotes', name: '收藏语录', icon: Quote, path: '/quotes', color: 'bg-indigo-50 text-indigo-600' },
-  { id: 'gallery', name: '作品画廊', icon: Image, path: '/gallery', color: 'bg-amber-50 text-amber-600' },
-  { id: 'mood', name: '情绪日志', icon: BookHeart, path: '/mood', color: 'bg-rose-50 text-rose-600' },
-  { id: 'inventory', name: '物品台账', icon: Package, path: '/inventory', color: 'bg-emerald-50 text-emerald-600' },
+  { id: 'quotes', name: '语录', icon: Quote, path: '/quotes', color: 'bg-indigo-50 text-indigo-600 hover:bg-indigo-100' },
+  { id: 'gallery', name: '画廊', icon: Image, path: '/gallery', color: 'bg-amber-50 text-amber-600 hover:bg-amber-100' },
+  { id: 'mood', name: '日志', icon: BookHeart, path: '/mood', color: 'bg-rose-50 text-rose-600 hover:bg-rose-100' },
+  { id: 'inventory', name: '台账', icon: Package, path: '/inventory', color: 'bg-emerald-50 text-emerald-600 hover:bg-emerald-100' },
 ];
 
+function getGridClass(count: number): string {
+  if (count === 1) return 'grid-cols-1';
+  if (count === 2 || count === 4) return 'grid-cols-2';
+  return 'grid-cols-3';
+}
+
+function getImageSpanClass(count: number): string {
+  if (count === 1) return 'aspect-[4/3]';
+  return 'aspect-square';
+}
+
 export default function Home() {
+  const navigate = useNavigate();
   const [profile, setProfile] = useState<UserProfile>({
     name: '你的名字',
     signature: '记录生活，珍藏美好',
@@ -28,330 +39,322 @@ export default function Home() {
   const [coverUrl, setCoverUrl] = useState('');
   const [editing, setEditing] = useState<string | null>(null);
   const [editValue, setEditValue] = useState('');
-  const [importing, setImporting] = useState(false);
   const avatarInputRef = useRef<HTMLInputElement>(null);
   const coverInputRef = useRef<HTMLInputElement>(null);
 
+  const [galleryItems, setGalleryItems] = useState<GalleryItem[]>([]);
+  const [galleryImageUrls, setGalleryImageUrls] = useState<Record<string, string>>({});
+  const [viewerOpen, setViewerOpen] = useState(false);
+  const [viewerImages, setViewerImages] = useState<string[]>([]);
+  const [viewerIndex, setViewerIndex] = useState(0);
+  const [detailItem, setDetailItem] = useState<GalleryItem | null>(null);
+
   useEffect(() => {
     const saved = storage.get<UserProfile>('personal_space_profile');
-    if (saved) {
-      setProfile(saved);
-      loadImages(saved);
-    }
+    if (saved) { setProfile(saved); loadImages(saved); }
   }, []);
+
+  useEffect(() => {
+    const saved = storage.get<GalleryItem[]>(STORAGE_KEYS.GALLERY);
+    if (saved) setGalleryItems(saved.sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, 10));
+  }, []);
+
+  useEffect(() => {
+    const loadGalleryUrls = async () => {
+      const allIds = new Set<string>();
+      galleryItems.forEach(item => item.imageUrls?.forEach(id => allIds.add(id)));
+      const urls: Record<string, string> = {};
+      for (const id of allIds) {
+        try { urls[id] = await imageManager.getImageUrl(id); } catch { urls[id] = ''; }
+      }
+      setGalleryImageUrls(urls);
+    };
+    loadGalleryUrls();
+  }, [galleryItems]);
 
   const loadImages = async (profileData: UserProfile) => {
     if (profileData.avatarPath) {
-      try {
-        const url = await imageManager.getImageUrl(profileData.avatarPath);
-        setAvatarUrl(url || '');
-      } catch {
-        setAvatarUrl('');
-      }
+      try { const url = await imageManager.getImageUrl(profileData.avatarPath); setAvatarUrl(url || ''); } catch { setAvatarUrl(''); }
     }
     if (profileData.coverPath) {
-      try {
-        const url = await imageManager.getImageUrl(profileData.coverPath);
-        setCoverUrl(url || '');
-      } catch {
-        setCoverUrl('');
-      }
+      try { const url = await imageManager.getImageUrl(profileData.coverPath); setCoverUrl(url || ''); } catch { setCoverUrl(''); }
     }
   };
 
-  const saveProfile = (newProfile: UserProfile) => {
-    setProfile(newProfile);
-    storage.set('personal_space_profile', newProfile);
-  };
+  const saveProfile = (newProfile: UserProfile) => { setProfile(newProfile); storage.set('personal_space_profile', newProfile); };
 
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>, type: 'avatar' | 'cover') => {
     const file = e.target.files?.[0];
     if (!file) return;
-
     try {
       const compressed = await imageManager.compressImage(file, type === 'avatar' ? 400 : 1200, type === 'avatar' ? 400 : 800);
-      const timestamp = Date.now();
       const random = Math.random().toString(36).substr(2, 9);
-      const customId = `${type}_${timestamp}_${random}`;
+      const customId = `${type}_${Date.now()}_${random}`;
       const imageId = await imageManager.saveImage(compressed, type, customId);
-
-      if (type === 'avatar' && profile.avatarPath) {
-        try {
-          await imageManager.deleteImage(profile.avatarPath);
-        } catch (e) {
-          console.error('Failed to delete old avatar:', e);
-        }
-      }
-      if (type === 'cover' && profile.coverPath) {
-        try {
-          await imageManager.deleteImage(profile.coverPath);
-        } catch (e) {
-          console.error('Failed to delete old cover:', e);
-        }
-      }
-
+      if (type === 'avatar' && profile.avatarPath) { try { await imageManager.deleteImage(profile.avatarPath); } catch (e) {} }
+      if (type === 'cover' && profile.coverPath) { try { await imageManager.deleteImage(profile.coverPath); } catch (e) {} }
       const newProfile = { ...profile, [type === 'avatar' ? 'avatarPath' : 'coverPath']: imageId };
       saveProfile(newProfile);
-
       const url = await imageManager.getImageUrl(imageId);
-      if (type === 'avatar') {
-        setAvatarUrl(url || '');
-      } else {
-        setCoverUrl(url || '');
-      }
-    } catch (error) {
-      console.error('Failed to upload image:', error);
-    }
+      if (type === 'avatar') setAvatarUrl(url || ''); else setCoverUrl(url || '');
+    } catch (error) { console.error('Failed to upload image:', error); }
   };
 
-  const startEdit = (field: string, value: string) => {
-    setEditing(field);
-    setEditValue(value);
-  };
-
+  const startEdit = (field: string, value: string) => { setEditing(field); setEditValue(value); };
   const saveEdit = () => {
     if (editing) {
       saveProfile({ ...profile, [editing]: editValue });
       if (editing === 'bio' && editValue.trim()) {
         const quotes = storage.get<QuoteType[]>(STORAGE_KEYS.QUOTES) || [];
-        const newQuote: QuoteType = {
-          id: Date.now().toString(),
-          content: editValue,
-          author: profile.name,
-          createdAt: new Date().toISOString(),
-          tags: ['个人感悟']
-        };
-        storage.set(STORAGE_KEYS.QUOTES, [newQuote, ...quotes]);
+        storage.set(STORAGE_KEYS.QUOTES, [{ id: Date.now().toString(), content: editValue, author: profile.name, createdAt: new Date().toISOString(), tags: ['个人感悟'] }, ...quotes]);
       }
       setEditing(null);
     }
   };
+  const cancelEdit = () => { setEditing(null); setEditValue(''); };
 
-  const cancelEdit = () => {
-    setEditing(null);
-    setEditValue('');
+  const getItemImages = (item: GalleryItem): string[] => {
+    if (!item.imageUrls) return [];
+    return item.imageUrls.slice(0, 9).map(id => galleryImageUrls[id]).filter(Boolean);
   };
 
-  const handleExport = async (mode: 'full' | 'data-only') => {
-    await dataExporter.exportData(mode);
+  const openImageViewer = (item: GalleryItem, index: number, e: React.MouseEvent) => {
+    e.stopPropagation();
+    const images = getItemImages(item);
+    if (images.length > 0) { setViewerImages(images); setViewerIndex(index); setViewerOpen(true); }
   };
 
-  const handleImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    setImporting(true);
-    try {
-      let result;
-      if (file.name.endsWith('.zip')) {
-        result = await dataImporter.importFromZip(file);
-      } else {
-        result = await dataImporter.importFromJson(file);
-      }
-
-      if (result.success) {
-        if (result.missingImages.length > 0) {
-          alert(`导入成功，但以下图片未找到：${result.missingImages.join(', ')}`);
-        } else {
-          alert('导入成功！');
-        }
-        window.location.reload();
-      } else {
-        alert('导入失败，请检查文件格式');
-      }
-    } catch (error) {
-      console.error('Import failed:', error);
-      alert('导入失败：' + (error as Error).message);
-    } finally {
-      setImporting(false);
-      e.target.value = '';
-    }
-  };
+  const openDetail = (item: GalleryItem) => { setDetailItem(item); };
 
   return (
-    <div className="min-h-screen bg-stone-50">
-      <motion.div
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        className="relative h-72"
-        style={{
-          backgroundImage: coverUrl ? `url(${coverUrl})` : 'linear-gradient(to bottom right, #e0e7ff, #fef3c7)',
-          backgroundSize: 'cover',
-          backgroundPosition: 'center',
-        }}
-      >
-        <button
-          onClick={() => coverInputRef.current?.click()}
-          className="absolute top-4 right-4 p-2 bg-white/80 rounded-full hover:bg-white transition"
-        >
-          <Camera size={20} className="text-stone-600" />
-        </button>
-        <input
-          ref={coverInputRef}
-          type="file"
-          accept="image/*"
-          onChange={(e) => handleImageUpload(e, 'cover')}
-          className="hidden"
+    <div className="relative min-h-screen">
+      {/* ========== 全屏封面背景 ========== */}
+      <div className="fixed inset-0 z-0">
+        <div
+          className="absolute inset-0"
+          style={{
+            backgroundImage: coverUrl ? `url(${coverUrl})` : 'linear-gradient(to bottom right, #e0e7ff, #fef3c7)',
+            backgroundSize: 'cover',
+            backgroundPosition: 'center',
+          }}
         />
-
-        <div className="absolute inset-0 flex flex-col items-center justify-center px-6">
-          <motion.div
-            initial={{ scale: 0.8, opacity: 0 }}
-            animate={{ scale: 1, opacity: 1 }}
-            className="relative"
-          >
-            <div
-              className="w-24 h-24 rounded-full bg-white shadow-lg flex items-center justify-center overflow-hidden cursor-pointer"
-              onClick={() => avatarInputRef.current?.click()}
-            >
-              {avatarUrl ? (
-                <img src={avatarUrl} alt="avatar" className="w-full h-full object-cover" />
-              ) : (
-                <span className="text-3xl font-light text-indigo-600">{profile.name.charAt(0)}</span>
-              )}
-            </div>
-            <div className="absolute bottom-0 right-0 p-1.5 bg-indigo-600 rounded-full">
-              <Camera size={14} className="text-white" />
-            </div>
-            <input
-              ref={avatarInputRef}
-              type="file"
-              accept="image/*"
-              onChange={(e) => handleImageUpload(e, 'avatar')}
-              className="hidden"
-            />
-          </motion.div>
-        </div>
-      </motion.div>
-
-      <div className="px-6 py-8 max-w-2xl mx-auto text-center">
-        {editing === 'name' ? (
-          <div className="flex items-center justify-center gap-2 mb-2">
-            <input
-              value={editValue}
-              onChange={(e) => setEditValue(e.target.value)}
-              className="text-2xl font-semibold text-center border-b-2 border-indigo-500 outline-none bg-transparent"
-            />
-            <button onClick={saveEdit} className="p-1 text-green-600"><Check size={18} /></button>
-            <button onClick={cancelEdit} className="p-1 text-red-600"><X size={18} /></button>
-          </div>
-        ) : (
-          <h1
-            className="text-2xl font-semibold text-stone-800 mb-2 cursor-pointer hover:text-indigo-600 transition-colors"
-            onDoubleClick={() => startEdit('name', profile.name)}
-          >
-            {profile.name}
-          </h1>
-        )}
-
-        {editing === 'signature' ? (
-          <div className="flex items-center justify-center gap-2 mb-4">
-            <input
-              value={editValue}
-              onChange={(e) => setEditValue(e.target.value)}
-              className="text-sm text-center border-b border-stone-300 outline-none bg-transparent w-64"
-            />
-            <button onClick={saveEdit} className="p-1 text-green-600"><Check size={16} /></button>
-            <button onClick={cancelEdit} className="p-1 text-red-600"><X size={16} /></button>
-          </div>
-        ) : (
-          <p
-            className="text-sm text-stone-500 italic mb-4 cursor-pointer hover:text-indigo-600 transition-colors"
-            onDoubleClick={() => startEdit('signature', profile.signature)}
-          >
-            {profile.signature}
-          </p>
-        )}
-
-        {editing === 'bio' ? (
-          <div className="flex flex-col items-center gap-2">
-            <textarea
-              value={editValue}
-              onChange={(e) => setEditValue(e.target.value)}
-              className="w-full max-w-md p-3 border border-stone-200 rounded-lg outline-none resize-none"
-              rows={3}
-            />
-            <p className="text-xs text-stone-400">保存后将自动同步到语录</p>
-            <div className="flex gap-2">
-              <button onClick={saveEdit} className="px-4 py-1 bg-indigo-600 text-white rounded-lg">保存</button>
-              <button onClick={cancelEdit} className="px-4 py-1 border border-stone-200 rounded-lg">取消</button>
-            </div>
-          </div>
-        ) : (
-          <p
-            className="text-stone-600 leading-relaxed max-w-md cursor-pointer hover:text-indigo-600 transition-colors mx-auto"
-            onDoubleClick={() => startEdit('bio', profile.bio)}
-          >
-            {profile.bio}
-          </p>
-        )}
+        {/* 半透明遮罩让内容更可读 */}
+        <div className="absolute inset-0 bg-white/70" />
       </div>
 
-      <div className="px-6 pb-12 max-w-4xl mx-auto">
-        <div className="flex justify-end mb-8">
-          <div className="relative group">
-            <button
-              className="flex items-center gap-2 px-3 py-1.5 text-sm text-stone-500 hover:text-stone-700 transition-colors"
-            >
-              <Download size={16} /> 
-            </button>
-            <div className="absolute right-0 top-full mt-1 w-32 bg-white rounded-lg shadow-lg border border-stone-100 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-10">
-              <button
-                onClick={() => handleExport('full')}
-                disabled={importing}
-                className="w-full px-4 py-2 text-left text-sm text-stone-600 hover:bg-stone-50 first:rounded-t-lg disabled:opacity-50"
+      {/* ========== 内容层 ========== */}
+      <div className="relative z-10 max-w-[90rem] mx-auto px-4 sm:px-8 pb-6">
+        <div className="flex flex-col md:flex-row gap-8">
+          {/* ===== 左栏（sticky 跟随滚动） ===== */}
+          <div className="w-full md:w-[30%] lg:w-[28%] shrink-0">
+            <div className="space-y-5 sticky top-[5.5rem]">
+
+            {/* 头像 + 个人信息 */}
+            <div className="bg-white/80 backdrop-blur rounded-2xl shadow-sm border border-white/50 p-7 text-center">
+              <motion.div
+                initial={{ scale: 0.8, opacity: 0 }}
+                animate={{ scale: 1, opacity: 1 }}
+                className="relative inline-block cursor-pointer"
+                onClick={() => avatarInputRef.current?.click()}
               >
-                导出完整包
-              </button>
-              <button
-                onClick={() => handleExport('data-only')}
-                disabled={importing}
-                className="w-full px-4 py-2 text-left text-sm text-stone-600 hover:bg-stone-50 disabled:opacity-50"
-              >
-                导出数据
-              </button>
-              <label className="w-full px-4 py-2 text-left text-sm text-stone-600 hover:bg-stone-50 cursor-pointer last:rounded-b-lg block">
-                <input
-                  type="file"
-                  accept=".json,.zip"
-                  onChange={handleImport}
-                  disabled={importing}
-                  className="hidden"
-                />
-                {importing ? '导入中...' : '导入数据'}
-              </label>
-            </div>
-          </div>
-        </div>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          {modules.map((module, index) => (
-            <motion.div
-              key={module.id}
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: index * 0.1 }}
-            >
-              <Link
-                to={module.path}
-                className="group block p-6 rounded-2xl bg-white shadow-sm hover:shadow-md transition-all border border-stone-100"
-              >
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-4">
-                    <div className={`w-12 h-12 rounded-xl ${module.color} flex items-center justify-center`}>
-                      <module.icon className="w-6 h-6" />
-                    </div>
-                    <div>
-                      <h3 className="font-medium text-stone-800">{module.name}</h3>
-                      <p className="text-sm text-stone-400 mt-0.5">点击进入</p>
+                <div className="w-28 h-28 rounded-full ring-4 ring-white/80 shadow-md flex items-center justify-center overflow-hidden mx-auto">
+                  {avatarUrl ? (
+                    <img src={avatarUrl} alt="avatar" className="w-full h-full object-cover" />
+                  ) : (
+                    <span className="text-4xl font-light text-indigo-600">{profile.name.charAt(0)}</span>
+                  )}
+                </div>
+                <div className="absolute bottom-0 right-0 p-1.5 bg-indigo-600 rounded-full">
+                  <Camera size={16} className="text-white" />
+                </div>
+                <input ref={avatarInputRef} type="file" accept="image/*" onChange={(e) => handleImageUpload(e, 'avatar')} className="hidden" />
+              </motion.div>
+
+              <div className="mt-4">
+                {editing === 'name' ? (
+                  <div className="flex items-center justify-center gap-1">
+                    <input value={editValue} onChange={(e) => setEditValue(e.target.value)} className="text-2xl font-semibold text-center border-b-2 border-indigo-500 outline-none bg-transparent w-44" />
+                    <button onClick={saveEdit} className="p-1 text-green-600"><Check size={20} /></button>
+                    <button onClick={cancelEdit} className="p-1 text-red-600"><X size={20} /></button>
+                  </div>
+                ) : (
+                  <h1 className="text-2xl font-semibold text-stone-800 cursor-pointer hover:text-indigo-600 transition-colors" onDoubleClick={() => startEdit('name', profile.name)}>{profile.name}</h1>
+                )}
+                {editing === 'signature' ? (
+                  <div className="flex items-center justify-center gap-1 mt-1">
+                    <input value={editValue} onChange={(e) => setEditValue(e.target.value)} className="text-base text-center border-b border-stone-300 outline-none bg-transparent w-52" />
+                    <button onClick={saveEdit} className="p-1 text-green-600"><Check size={16} /></button>
+                    <button onClick={cancelEdit} className="p-1 text-red-600"><X size={16} /></button>
+                  </div>
+                ) : (
+                  <p className="text-base text-stone-400 italic mt-1 cursor-pointer hover:text-indigo-600 transition-colors" onDoubleClick={() => startEdit('signature', profile.signature)}>{profile.signature}</p>
+                )}
+              </div>
+
+              <div className="mt-3">
+                {editing === 'bio' ? (
+                  <div className="flex flex-col items-center gap-2">
+                    <textarea value={editValue} onChange={(e) => setEditValue(e.target.value)} className="w-full p-3 border border-stone-200 rounded-lg outline-none resize-none text-base" rows={3} />
+                    <p className="text-sm text-stone-400">保存后将自动同步到语录</p>
+                    <div className="flex gap-2">
+                      <button onClick={saveEdit} className="px-5 py-2 bg-indigo-600 text-white text-base rounded-lg">保存</button>
+                      <button onClick={cancelEdit} className="px-5 py-2 border border-stone-200 text-base rounded-lg">取消</button>
                     </div>
                   </div>
-                  <ArrowRight className="w-5 h-5 text-stone-300 group-hover:text-indigo-400 group-hover:translate-x-1 transition-all" />
-                </div>
-              </Link>
-            </motion.div>
-          ))}
+                ) : (
+                  <p className="text-stone-500 text-base leading-relaxed cursor-pointer hover:text-indigo-600 transition-colors line-clamp-3" onDoubleClick={() => startEdit('bio', profile.bio)}>{profile.bio}</p>
+                )}
+              </div>
+
+              {/* 更换封面 */}
+              <button
+                onClick={() => coverInputRef.current?.click()}
+                className="mt-4 flex items-center gap-1.5 mx-auto text-sm text-stone-400 hover:text-indigo-600 transition-colors"
+              >
+                <Camera size={16} /> 更换封面
+              </button>
+              <input ref={coverInputRef} type="file" accept="image/*" onChange={(e) => handleImageUpload(e, 'cover')} className="hidden" />
+            </div>
+
+            {/* 模块导航 - 2x2 图标+文字 */}
+            <div className="bg-white/80 backdrop-blur rounded-2xl shadow-sm border border-white/50 p-6">
+              <div className="grid grid-cols-2 gap-4">
+                {modules.map((mod) => (
+                  <Link
+                    key={mod.id}
+                    to={mod.path}
+                    className="flex flex-col items-center gap-3 py-4 px-2 rounded-xl hover:bg-stone-50/80 transition-colors"
+                  >
+                    <div className={`w-14 h-14 rounded-xl ${mod.color} flex items-center justify-center`}>
+                      <mod.icon className="w-7 h-7" />
+                    </div>
+                    <span className="text-sm font-medium text-stone-600">{mod.name}</span>
+                  </Link>
+                ))}
+              </div>
+            </div>
+
+            </div>
+          </div>
+
+          {/* ===== 右栏 ===== */}
+          <div className="w-full md:w-[70%] lg:w-[72%] min-w-0">
+
+            {galleryItems.length === 0 ? (
+              <div className="bg-white/80 backdrop-blur rounded-2xl shadow-sm border border-white/50 p-12 text-center">
+                <ImageOff className="w-12 h-12 text-stone-300 mx-auto mb-3" />
+                <p className="text-stone-400">暂无作品</p>
+                <p className="text-stone-300 text-sm mt-1">前往画廊添加你的第一个作品吧</p>
+              </div>
+            ) : (
+              <div className="space-y-5" style={{ transform: 'translateZ(0)' }}>
+                {galleryItems.map((item, index) => {
+                  const images = getItemImages(item);
+                  const gridClass = getGridClass(images.length);
+                  return (
+                    <motion.div
+                      key={item.id}
+                      initial={{ opacity: 0, y: 20 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ delay: index * 0.06 }}
+                      className="bg-white/90 backdrop-blur rounded-2xl shadow-sm border border-white/50 overflow-hidden cursor-pointer hover:shadow-md transition-shadow"
+                      onClick={() => openDetail(item)}
+                    >
+                      {/* 头像 + 昵称 */}
+                      <div className="flex items-center gap-3 px-14 pt-10 pb-2">
+                        <div className="w-14 h-14 rounded-full bg-stone-200 flex items-center justify-center overflow-hidden shrink-0">
+                          {avatarUrl ? (
+                            <img src={avatarUrl} alt="" className="w-full h-full object-cover" />
+                          ) : (
+                            <span className="text-lg font-medium text-stone-500">{profile.name.charAt(0)}</span>
+                          )}
+                        </div>
+                        <span className="text-base font-medium text-stone-700">{profile.name}</span>
+                      </div>
+
+                      <div className="flex items-center justify-between px-14 pb-3">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <span className="px-2 py-1 bg-indigo-50 text-indigo-600 text-xs rounded-full font-medium shrink-0">{item.category}</span>
+                          <h3 className="font-semibold text-stone-800 truncate">{item.title}</h3>
+                        </div>
+                        <span className="text-xs text-stone-400 shrink-0 ml-2">{item.createdAt}</span>
+                      </div>
+
+                      {item.description && (
+                        <div className="px-14 pb-3" onClick={(e) => { e.stopPropagation(); openDetail(item); }}>
+                          <p className="text-sm text-stone-500 line-clamp-2 leading-relaxed">{item.description}</p>
+                        </div>
+                      )}
+
+                      {images.length > 0 && (
+                        <div className={`px-14 pb-8 grid ${gridClass} gap-1.5`}>
+                          {images.map((url, imgIdx) => (
+                            <div
+                              key={imgIdx}
+                              className={`${getImageSpanClass(images.length)} bg-stone-100 rounded-lg overflow-hidden`}
+                              onClick={(e) => openImageViewer(item, imgIdx, e)}
+                            >
+                              <img src={url} alt={`${item.title}-${imgIdx + 1}`} className="w-full h-full object-cover" loading="lazy" />
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </motion.div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
         </div>
       </div>
+
+      {/* ========== 图片查看器 ========== */}
+      <ImageViewer images={viewerImages} initialIndex={viewerIndex} isOpen={viewerOpen} onClose={() => setViewerOpen(false)} />
+
+      {/* ========== 作品详情弹窗 ========== */}
+      {detailItem && (
+        <motion.div
+          initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+          className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
+          onClick={() => setDetailItem(null)}
+        >
+          <motion.div
+            initial={{ scale: 0.9 }} animate={{ scale: 1 }} exit={{ scale: 0.9 }}
+            className="bg-white rounded-2xl p-6 w-full max-w-2xl max-h-[90vh] overflow-y-auto"
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between mb-4">
+              <span className="px-2 py-1 bg-indigo-50 text-indigo-600 text-xs rounded-full">{detailItem.category}</span>
+              <button onClick={() => setDetailItem(null)} className="p-2 hover:bg-stone-100 rounded-lg"><X size={20} /></button>
+            </div>
+            {getItemImages(detailItem).length > 0 && (
+              <div className="mb-6">
+                {getItemImages(detailItem).length === 1 ? (
+                  <img src={getItemImages(detailItem)[0]} alt={detailItem.title} className="w-full h-64 object-cover rounded-xl cursor-zoom-in" onClick={(e) => openImageViewer(detailItem, 0, e)} />
+                ) : (
+                  <div className={`grid ${getGridClass(getItemImages(detailItem).length)} gap-1.5`}>
+                    {getItemImages(detailItem).map((url, idx) => (
+                      <img key={idx} src={url} alt={`${detailItem.title}-${idx + 1}`} className="w-full aspect-square object-cover rounded-xl cursor-zoom-in" onClick={(e) => openImageViewer(detailItem, idx, e)} />
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+            <h2 className="text-xl font-bold text-stone-800 mb-2">{detailItem.title}</h2>
+            <p className="text-stone-500 mb-4">{detailItem.description}</p>
+            {detailItem.story && (
+              <div className="bg-stone-50 rounded-xl p-4">
+                <h3 className="font-medium text-stone-700 mb-2">作品故事</h3>
+                <div className="prose prose-sm max-w-none text-stone-600" dangerouslySetInnerHTML={{ __html: detailItem.story }} />
+              </div>
+            )}
+            <div className="flex gap-3 mt-6">
+              <button onClick={() => { setDetailItem(null); navigate('/gallery'); }} className="flex-1 py-3 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 transition-colors">前往画廊</button>
+              <button onClick={() => setDetailItem(null)} className="flex-1 py-3 border border-stone-200 rounded-xl hover:bg-stone-50 transition-colors">关闭</button>
+            </div>
+          </motion.div>
+        </motion.div>
+      )}
     </div>
   );
 }
