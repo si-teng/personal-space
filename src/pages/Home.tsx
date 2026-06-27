@@ -7,6 +7,7 @@ import { imageManager } from '../utils/imageManager';
 import type { UserProfile, Quote as QuoteType, GalleryItem } from '../types';
 import { STORAGE_KEYS } from '../types';
 import { ImageViewer } from '../components/ImageViewer';
+import ItemInteractions from '../components/ItemInteractions';
 
 const modules = [
   { id: 'quotes', name: '语录', icon: Quote, path: '/quotes', color: 'bg-indigo-50 text-indigo-600 hover:bg-indigo-100' },
@@ -63,11 +64,13 @@ export default function Home() {
     const loadGalleryUrls = async () => {
       const allIds = new Set<string>();
       galleryItems.forEach(item => item.imageUrls?.forEach(id => allIds.add(id)));
-      const urls: Record<string, string> = {};
-      for (const id of allIds) {
-        try { urls[id] = await imageManager.getImageUrl(id); } catch { urls[id] = ''; }
-      }
-      setGalleryImageUrls(urls);
+      const entries = await Promise.all(
+        Array.from(allIds).map(async (id) => {
+          try { return [id, await imageManager.getImageUrl(id) || ''] as const; }
+          catch { return [id, ''] as const; }
+        })
+      );
+      setGalleryImageUrls(Object.fromEntries(entries));
     };
     loadGalleryUrls();
   }, [galleryItems]);
@@ -125,6 +128,16 @@ export default function Home() {
   };
 
   const openDetail = (item: GalleryItem) => { setDetailItem(item); };
+
+  const handleUpdateGalleryItem = (updatedItem: GalleryItem) => {
+    setGalleryItems(prev =>
+      prev.map(i => i.id === updatedItem.id ? updatedItem : i)
+    );
+    if (detailItem?.id === updatedItem.id) setDetailItem(updatedItem);
+    const allItems = storage.get<GalleryItem[]>(STORAGE_KEYS.GALLERY) || [];
+    const updatedAll = allItems.map(i => i.id === updatedItem.id ? updatedItem : i);
+    storage.set(STORAGE_KEYS.GALLERY, updatedAll);
+  };
 
   return (
     <div className="relative min-h-screen">
@@ -299,6 +312,8 @@ export default function Home() {
                           ))}
                         </div>
                       )}
+
+                      <ItemInteractions item={item} userName={profile.name} onUpdate={handleUpdateGalleryItem} variant="feed" />
                     </motion.div>
                   );
                 })}
@@ -348,6 +363,9 @@ export default function Home() {
                 <div className="prose prose-sm max-w-none text-stone-600" dangerouslySetInnerHTML={{ __html: detailItem.story }} />
               </div>
             )}
+            <div className="mt-4 border-t border-stone-100 pt-4">
+              <ItemInteractions item={detailItem} userName={profile.name} onUpdate={handleUpdateGalleryItem} variant="detail" />
+            </div>
             <div className="flex gap-3 mt-6">
               <button onClick={() => { setDetailItem(null); navigate('/gallery'); }} className="flex-1 py-3 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 transition-colors">前往画廊</button>
               <button onClick={() => setDetailItem(null)} className="flex-1 py-3 border border-stone-200 rounded-xl hover:bg-stone-50 transition-colors">关闭</button>

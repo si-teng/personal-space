@@ -26,6 +26,21 @@ export interface GalleryItem {
   category: string;
   createdAt: string;
   story?: string;
+  likes?: Like[];
+  comments?: Comment[];
+}
+
+export interface Like {
+  id: string;
+  userName: string;
+  createdAt: string;
+}
+
+export interface Comment {
+  id: string;
+  userName: string;
+  content: string;
+  createdAt: string;
 }
 
 // Mood Entry
@@ -87,4 +102,5 @@ export const STORAGE_KEYS = {
   CUSTOM_MOODS: 'personal_space_custom_moods',
   MOOD_FILTER: 'personal_space_mood_filter',
   INVENTORY: 'personal_space_inventory',
+  GALLERY_CATEGORIES: 'personal_space_gallery_categories',
 } as const;

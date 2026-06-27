@@ -14,6 +14,7 @@ interface ImageRecord {
 
 class ImageManager {
   private db: IDBDatabase | null = null;
+  private urlCache: Map<string, string> = new Map();
 
   async init(): Promise<void> {
     return new Promise((resolve, reject) => {
@@ -70,25 +71,29 @@ class ImageManager {
   }
 
   async getImageUrl(id: string): Promise<string | null> {
+    if (this.urlCache.has(id)) return this.urlCache.get(id)!;
     const record = await this.getImage(id);
     if (!record) return null;
-    
-    return new Promise((resolve, reject) => {
+
+    const url = await new Promise<string>((resolve, reject) => {
       const reader = new FileReader();
       reader.onload = () => resolve(reader.result as string);
       reader.onerror = () => reject(reader.error);
       reader.readAsDataURL(record.data);
     });
+    this.urlCache.set(id, url);
+    return url;
   }
 
   async deleteImage(id: string): Promise<void> {
     await this.init();
-    
+    this.urlCache.delete(id);
+
     return new Promise((resolve, reject) => {
       const transaction = this.db!.transaction([STORE_NAME], 'readwrite');
       const store = transaction.objectStore(STORE_NAME);
       const request = store.delete(id);
-      
+
       request.onsuccess = () => resolve();
       request.onerror = () => reject(request.error);
     });
@@ -194,7 +199,8 @@ class ImageManager {
 
   async clearAllImages(): Promise<void> {
     await this.init();
-    
+    this.urlCache.clear();
+
     return new Promise((resolve, reject) => {
       const transaction = this.db!.transaction([STORE_NAME], 'readwrite');
       const store = transaction.objectStore(STORE_NAME);

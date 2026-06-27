@@ -1,24 +1,32 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Plus, X, Filter, Edit2, Trash2, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Plus, X, Filter, Edit2, Trash2, ChevronLeft, ChevronRight, Settings } from 'lucide-react';
 import { useEditor, EditorContent } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import Placeholder from '@tiptap/extension-placeholder';
 import Underline from '@tiptap/extension-underline';
-import { GalleryItem } from '../types';
+import { GalleryItem, STORAGE_KEYS, UserProfile } from '../types';
 import { storage } from '../utils/storage';
 import { imageManager } from '../utils/imageManager';
 import { ImageUploader } from '../components/ImageUploader';
 import { ImageViewer } from '../components/ImageViewer';
+import ItemInteractions from '../components/ItemInteractions';
 
 const STORAGE_KEY = 'personal_space_gallery';
 
 export default function Gallery() {
   const [items, setItems] = useState<GalleryItem[]>([]);
-  const [categories, setCategories] = useState<string[]>(['全部', '摄影', '绘画', '设计']);
+  const [categories, setCategories] = useState<string[]>(() => {
+    const saved = storage.get<string[]>(STORAGE_KEYS.GALLERY_CATEGORIES);
+    return saved && saved.length > 0 ? saved : ['全部', '摄影', '绘画', '设计'];
+  });
   const [activeCategory, setActiveCategory] = useState('全部');
   const [showAddModal, setShowAddModal] = useState(false);
   const [showDetailModal, setShowDetailModal] = useState(false);
+  const [showCategoryManager, setShowCategoryManager] = useState(false);
+  const [editingCat, setEditingCat] = useState<string | null>(null);
+  const [editCatName, setEditCatName] = useState('');
+  const [newCatName, setNewCatName] = useState('');
   const [selectedItem, setSelectedItem] = useState<GalleryItem | null>(null);
   const [isEditing, setIsEditing] = useState(false);
   const [imageUrls, setImageUrls] = useState<Record<string, string>>({});
@@ -38,6 +46,12 @@ export default function Gallery() {
     content: '',
   });
 
+  const [userName, setUserName] = useState('你的名字');
+  useEffect(() => {
+    const profile = storage.get<UserProfile>(STORAGE_KEYS.PROFILE);
+    if (profile?.name) setUserName(profile.name);
+  }, []);
+
   useEffect(() => {
     const saved = storage.get<GalleryItem[]>(STORAGE_KEY);
     setItems(saved || []);
@@ -50,22 +64,21 @@ export default function Gallery() {
         item.imageUrls?.forEach(id => allImageIds.add(id));
       });
 
-      const urls: Record<string, string> = {};
-      for (const imageId of allImageIds) {
-        try {
-          urls[imageId] = await imageManager.getImageUrl(imageId);
-        } catch {
-          urls[imageId] = '';
-        }
-      }
-      setImageUrls(urls);
+      const entries = await Promise.all(
+        Array.from(allImageIds).map(async (imageId) => {
+          try { return [imageId, await imageManager.getImageUrl(imageId) || ''] as const; }
+          catch { return [imageId, ''] as const; }
+        })
+      );
+      setImageUrls(Object.fromEntries(entries));
     };
     loadImageUrls();
   }, [items]);
 
+  const sortedItems = [...items].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   const filteredItems = activeCategory === '全部'
-    ? items
-    : items.filter(item => item.category === activeCategory);
+    ? sortedItems
+    : sortedItems.filter(item => item.category === activeCategory);
 
   const getCoverImage = (item: GalleryItem): string => {
     if (item.imageUrls && item.imageUrls.length > 0) {
@@ -112,7 +125,9 @@ export default function Gallery() {
       imageUrls: renamedImageIds,
       category: formData.category,
       story: storyContent,
-      createdAt: selectedItem?.createdAt || new Date().toISOString().split('T')[0]
+      createdAt: selectedItem?.createdAt || new Date().toISOString(),
+      likes: selectedItem?.likes,
+      comments: selectedItem?.comments
     };
 
     if (selectedItem) {
@@ -153,6 +168,13 @@ export default function Gallery() {
     if (selectedItem?.id === id) setShowDetailModal(false);
   };
 
+  const handleUpdateItem = (updatedItem: GalleryItem) => {
+    const updated = items.map(i => i.id === updatedItem.id ? updatedItem : i);
+    setItems(updated);
+    storage.set(STORAGE_KEY, updated);
+    if (selectedItem?.id === updatedItem.id) setSelectedItem(updatedItem);
+  };
+
   const openDetail = (item: GalleryItem) => {
     setSelectedItem(item);
     setFormData({
@@ -184,6 +206,50 @@ export default function Gallery() {
 
   const startEdit = () => {
     setIsEditing(true);
+  };
+
+  const saveCategories = (newCategories: string[]) => {
+    setCategories(newCategories);
+    storage.set(STORAGE_KEYS.GALLERY_CATEGORIES, newCategories);
+  };
+
+  const handleAddCategory = () => {
+    const name = newCatName.trim();
+    if (!name || categories.includes(name)) return;
+    saveCategories([...categories, name]);
+    setNewCatName('');
+  };
+
+  const handleStartEditCat = (cat: string) => {
+    setEditingCat(cat);
+    setEditCatName(cat);
+  };
+
+  const handleSaveEditCat = () => {
+    const newName = editCatName.trim();
+    if (!newName || !editingCat || newName === editingCat) {
+      setEditingCat(null);
+      return;
+    }
+    if (categories.includes(newName)) {
+      setEditingCat(null);
+      return;
+    }
+    const updatedCategories = categories.map(c => c === editingCat ? newName : c);
+    saveCategories(updatedCategories);
+    // Update all items with the old category
+    const updatedItems = items.map(item =>
+      item.category === editingCat ? { ...item, category: newName } : item
+    );
+    setItems(updatedItems);
+    storage.set(STORAGE_KEY, updatedItems);
+    if (activeCategory === editingCat) setActiveCategory(newName);
+    setEditingCat(null);
+  };
+
+  const handleDeleteCat = (cat: string) => {
+    saveCategories(categories.filter(c => c !== cat));
+    if (activeCategory === cat) setActiveCategory('全部');
   };
 
   const openImageViewer = (item: GalleryItem, index: number) => {
@@ -218,6 +284,13 @@ export default function Gallery() {
               {cat}
             </button>
           ))}
+          <button
+            onClick={() => setShowCategoryManager(true)}
+            className="p-2 text-stone-400 hover:text-indigo-600 hover:bg-white rounded-lg transition-colors"
+            title="管理分类"
+          >
+            <Settings size={18} />
+          </button>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -244,9 +317,15 @@ export default function Gallery() {
                 )}
               </div>
               <div className="p-4">
-                <span className="text-xs text-indigo-600 font-medium">{item.category}</span>
+                <div className="flex items-start justify-between">
+                  <span className="text-xs text-indigo-600 font-medium">{item.category}</span>
+                  <span className="text-xs text-stone-400 ml-2 shrink-0">
+                    {new Date(item.createdAt).toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' })} {new Date(item.createdAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}
+                  </span>
+                </div>
                 <h3 className="text-lg font-semibold text-stone-800 mt-1">{item.title}</h3>
-                <p className="text-stone-500 text-sm mt-2 line-clamp-2">{item.description}</p>
+                <p className="text-stone-500 text-sm mt-2 line-clamp-1">{item.description}</p>
+                <ItemInteractions item={item} userName={userName} onUpdate={handleUpdateItem} variant="grid" />
               </div>
             </motion.div>
           ))}
@@ -366,6 +445,9 @@ export default function Gallery() {
                     <div className="prose prose-sm max-w-none text-stone-600" dangerouslySetInnerHTML={{ __html: selectedItem.story }} />
                   </div>
                 )}
+                <div className="mt-4 border-t border-stone-100 pt-4">
+                  <ItemInteractions item={selectedItem} userName={userName} onUpdate={handleUpdateItem} variant="detail" />
+                </div>
               </motion.div>
             </motion.div>
           )}
@@ -377,6 +459,76 @@ export default function Gallery() {
           isOpen={viewerOpen}
           onClose={() => setViewerOpen(false)}
         />
+
+        {/* 分类管理弹窗 */}
+        <AnimatePresence>
+          {showCategoryManager && (
+            <motion.div
+              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+              className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
+              onClick={() => { setShowCategoryManager(false); setEditingCat(null); setNewCatName(''); }}
+            >
+              <motion.div
+                initial={{ scale: 0.9 }} animate={{ scale: 1 }} exit={{ scale: 0.9 }}
+                className="bg-white rounded-2xl p-6 w-full max-w-md"
+                onClick={e => e.stopPropagation()}
+              >
+                <div className="flex items-center justify-between mb-4">
+                  <h2 className="text-xl font-bold text-stone-800">管理分类标签</h2>
+                  <button onClick={() => { setShowCategoryManager(false); setEditingCat(null); setNewCatName(''); }} className="p-2 hover:bg-stone-100 rounded-lg"><X size={20} /></button>
+                </div>
+
+                <div className="space-y-3 mb-4 max-h-64 overflow-y-auto">
+                  {categories.filter(c => c !== '全部').map(cat => (
+                    <div key={cat} className="flex items-center gap-2">
+                      {editingCat === cat ? (
+                        <>
+                          <input
+                            type="text"
+                            value={editCatName}
+                            onChange={e => setEditCatName(e.target.value)}
+                            onKeyDown={e => { if (e.key === 'Enter') handleSaveEditCat(); if (e.key === 'Escape') setEditingCat(null); }}
+                            className="flex-1 px-3 py-2 border border-indigo-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none text-sm"
+                            autoFocus
+                          />
+                          <button onClick={handleSaveEditCat} className="p-1.5 text-green-600 hover:bg-green-50 rounded-lg" title="保存"><Edit2 size={16} /></button>
+                          <button onClick={() => setEditingCat(null)} className="p-1.5 text-stone-400 hover:bg-stone-100 rounded-lg"><X size={16} /></button>
+                        </>
+                      ) : (
+                        <>
+                          <span className="flex-1 px-3 py-2 bg-stone-50 rounded-lg text-sm text-stone-700">{cat}</span>
+                          <button onClick={() => handleStartEditCat(cat)} className="p-1.5 text-stone-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg" title="编辑"><Edit2 size={16} /></button>
+                          <button onClick={() => handleDeleteCat(cat)} className="p-1.5 text-stone-400 hover:text-red-600 hover:bg-red-50 rounded-lg" title="删除"><Trash2 size={16} /></button>
+                        </>
+                      )}
+                    </div>
+                  ))}
+                  {categories.filter(c => c !== '全部').length === 0 && (
+                    <p className="text-sm text-stone-400 text-center py-4">暂无分类标签</p>
+                  )}
+                </div>
+
+                <div className="flex items-center gap-2 border-t border-stone-100 pt-4">
+                  <input
+                    type="text"
+                    value={newCatName}
+                    onChange={e => setNewCatName(e.target.value)}
+                    onKeyDown={e => { if (e.key === 'Enter') handleAddCategory(); }}
+                    placeholder="输入新分类名称"
+                    className="flex-1 px-4 py-2 border border-stone-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none text-sm"
+                  />
+                  <button
+                    onClick={handleAddCategory}
+                    disabled={!newCatName.trim()}
+                    className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed text-sm"
+                  >
+                    添加
+                  </button>
+                </div>
+              </motion.div>
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
     </div>
   );
