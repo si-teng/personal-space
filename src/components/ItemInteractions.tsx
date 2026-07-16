@@ -27,6 +27,7 @@ export default function ItemInteractions({ item, userName, onUpdate, variant }: 
   const [showComments, setShowComments] = useState(variant !== 'grid');
   const [commentText, setCommentText] = useState('');
   const [commentAuthor, setCommentAuthor] = useState(userName);
+  const [showAllComments, setShowAllComments] = useState(false);
 
   const likes: Like[] = item.likes || [];
   const comments: Comment[] = item.comments || [];
@@ -140,9 +141,13 @@ export default function ItemInteractions({ item, userName, onUpdate, variant }: 
           </form>
 
           {/* Comment list */}
-          {comments.length > 0 && (
-            <div className={`space-y-2 ${variant === 'feed' ? 'max-h-40 overflow-y-auto' : ''}`}>
-              {[...comments].reverse().map(c => (
+          {comments.length > 0 && (() => {
+            const reversed = [...comments].reverse();
+            const shouldFold = variant === 'feed' && comments.length > 10;
+            const visible = (shouldFold && !showAllComments) ? reversed.slice(0, 5) : reversed;
+            return (
+            <div className="space-y-2">
+              {visible.map(c => (
                 <div key={c.id} className="bg-stone-50 rounded-lg p-2.5">
                   <div className="flex items-center justify-between">
                     <span className="text-xs">
@@ -159,8 +164,15 @@ export default function ItemInteractions({ item, userName, onUpdate, variant }: 
                   <p className="text-sm text-stone-600 mt-1 whitespace-pre-wrap break-words">{c.content}</p>
                 </div>
               ))}
+              {shouldFold && !showAllComments && (
+                <button onClick={(e) => { e.stopPropagation(); setShowAllComments(true); }}
+                  className="text-xs text-indigo-500 hover:text-indigo-600 font-medium">
+                  展示全部评论 ({comments.length}条)
+                </button>
+              )}
             </div>
-          )}
+            );
+          })()}
         </div>
       )}
     </div>

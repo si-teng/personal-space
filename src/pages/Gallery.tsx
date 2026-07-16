@@ -58,6 +58,12 @@ export default function Gallery() {
   }, []);
 
   useEffect(() => {
+    if (showAddModal || showDetailModal || showCategoryManager || viewerOpen) document.body.style.overflow = 'hidden';
+    else document.body.style.overflow = '';
+    return () => { document.body.style.overflow = ''; };
+  }, [showAddModal, showDetailModal, showCategoryManager, viewerOpen]);
+
+  useEffect(() => {
     const loadImageUrls = async () => {
       const allImageIds = new Set<string>();
       items.forEach(item => {
@@ -262,7 +268,7 @@ export default function Gallery() {
   };
 
   return (
-    <div className="min-h-screen bg-stone-50 p-6">
+    <div className="min-h-screen bg-stone-50 px-3 sm:px-6 py-6">
       <div className="max-w-6xl mx-auto">
         <div className="flex items-center justify-between mb-8">
           <h1 className="text-3xl font-bold text-stone-800">作品画廊</h1>

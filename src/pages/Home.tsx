@@ -156,7 +156,7 @@ export default function Home() {
       </div>
 
       {/* ========== 内容层 ========== */}
-      <div className="relative z-10 max-w-[90rem] mx-auto px-4 sm:px-8 pb-6">
+      <div className="relative z-10 max-w-[90rem] mx-auto px-2 sm:px-4 md:px-8 pb-6">
         <div className="flex flex-col md:flex-row gap-8">
           {/* ===== 左栏（sticky 跟随滚动） ===== */}
           <div className="w-full md:w-[30%] lg:w-[28%] shrink-0">
@@ -219,13 +219,30 @@ export default function Home() {
                 )}
               </div>
 
-              {/* 更换封面 */}
-              <button
-                onClick={() => coverInputRef.current?.click()}
-                className="mt-4 flex items-center gap-1.5 mx-auto text-sm text-stone-400 hover:text-indigo-600 transition-colors"
-              >
-                <Camera size={16} /> 更换封面
-              </button>
+              {/* Cover controls — icon with hover dropdown */}
+              <div className="mt-4 flex justify-center">
+                <div className="relative group/cover">
+                  <button className="p-1.5 text-stone-300 hover:text-stone-500 transition-colors rounded-full">
+                    <Camera size={18} />
+                  </button>
+                  <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 w-36 bg-white rounded-xl shadow-lg border border-stone-100 py-1 opacity-0 invisible group-hover/cover:opacity-100 group-hover/cover:visible transition-all z-30">
+                    <button onClick={() => coverInputRef.current?.click()}
+                      className="w-full px-3 py-2 text-left text-xs text-stone-600 hover:bg-stone-50 transition-colors flex items-center gap-2">
+                      <Camera size={13} /> 更换封面
+                    </button>
+                    <button onClick={() => {
+                      if (profile.coverPath) {
+                        try { imageManager.deleteImage(profile.coverPath); } catch(e) {}
+                      }
+                      saveProfile({ ...profile, coverPath: '' });
+                      setCoverUrl('');
+                    }}
+                      className="w-full px-3 py-2 text-left text-xs text-stone-600 hover:bg-stone-50 transition-colors flex items-center gap-2">
+                      <X size={13} /> 还原封面
+                    </button>
+                  </div>
+                </div>
+              </div>
               <input ref={coverInputRef} type="file" accept="image/*" onChange={(e) => handleImageUpload(e, 'cover')} className="hidden" />
             </div>
 
@@ -274,7 +291,7 @@ export default function Home() {
                       onClick={() => openDetail(item)}
                     >
                       {/* 头像 + 昵称 */}
-                      <div className="flex items-center gap-3 px-14 pt-10 pb-2">
+                      <div className="flex items-center gap-3 px-4 md:px-14 pt-10 pb-2">
                         <div className="w-14 h-14 rounded-full bg-stone-200 flex items-center justify-center overflow-hidden shrink-0">
                           {avatarUrl ? (
                             <img src={avatarUrl} alt="" className="w-full h-full object-cover" />
@@ -285,7 +302,7 @@ export default function Home() {
                         <span className="text-base font-medium text-stone-700">{profile.name}</span>
                       </div>
 
-                      <div className="flex items-center justify-between px-14 pb-3">
+                      <div className="flex items-center justify-between px-4 md:px-14 pb-3">
                         <div className="flex items-center gap-2 min-w-0">
                           <span className="px-2 py-1 bg-indigo-50 text-indigo-600 text-xs rounded-full font-medium shrink-0">{item.category}</span>
                           <h3 className="font-semibold text-stone-800 truncate">{item.title}</h3>
@@ -294,13 +311,13 @@ export default function Home() {
                       </div>
 
                       {item.description && (
-                        <div className="px-14 pb-3" onClick={(e) => { e.stopPropagation(); openDetail(item); }}>
+                        <div className="px-4 md:px-14 pb-3" onClick={(e) => { e.stopPropagation(); openDetail(item); }}>
                           <p className="text-sm text-stone-500 line-clamp-2 leading-relaxed">{item.description}</p>
                         </div>
                       )}
 
                       {images.length > 0 && (
-                        <div className={`px-14 pb-8 grid ${gridClass} gap-1.5`}>
+                        <div className={`px-4 md:px-14 pb-8 grid ${gridClass} gap-1.5`}>
                           {images.map((url, imgIdx) => (
                             <div
                               key={imgIdx}

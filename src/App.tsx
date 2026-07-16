@@ -22,6 +22,8 @@ function Navigation() {
   const location = useLocation();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [importing, setImporting] = useState(false);
+  const [pendingFile, setPendingFile] = useState<File | null>(null);
+  const [showImportMode, setShowImportMode] = useState(false);
 
   const handleExport = async (mode: 'full' | 'data-only') => {
     await dataExporter.exportData(mode);
@@ -30,20 +32,29 @@ function Navigation() {
   const handleImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    setPendingFile(file);
+    setShowImportMode(true);
+    e.target.value = '';
+  };
+
+  const executeImport = async (merge: boolean) => {
+    if (!pendingFile) return;
+    setShowImportMode(false);
     setImporting(true);
     try {
       let result;
-      if (file.name.endsWith('.zip')) result = await dataImporter.importFromZip(file);
-      else result = await dataImporter.importFromJson(file);
+      if (pendingFile.name.endsWith('.zip')) result = await dataImporter.importFromZip(pendingFile, merge);
+      else result = await dataImporter.importFromJson(pendingFile, undefined, merge);
       if (result.success) {
         alert(result.missingImages.length > 0 ? `导入成功，但以下图片未找到：${result.missingImages.join(', ')}` : '导入成功！');
         window.location.reload();
       } else { alert('导入失败，请检查文件格式'); }
     } catch (error) { alert('导入失败：' + (error as Error).message); }
-    finally { setImporting(false); e.target.value = ''; }
+    finally { setImporting(false); setPendingFile(null); }
   };
 
   return (
+    <>
     <nav className="fixed top-0 left-0 right-0 z-50 bg-warm-white/90 backdrop-blur-sm border-b border-stone-200">
       <div className="max-w-6xl mx-auto px-4 sm:px-6">
         <div className="flex items-center justify-between h-16">
@@ -132,6 +143,31 @@ function Navigation() {
         )}
       </AnimatePresence>
     </nav>
+
+    {/* Import mode selection modal */}
+    {showImportMode && (
+      <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[100]" onClick={() => { setShowImportMode(false); setPendingFile(null); }}>
+        <div className="bg-white rounded-2xl p-6 w-80 shadow-xl mx-4" onClick={e => e.stopPropagation()}>
+          <h3 className="text-lg font-semibold text-stone-800 mb-2">选择导入模式</h3>
+          <p className="text-sm text-stone-500 mb-4">导入数据将如何处理原有数据？</p>
+          <div className="space-y-3">
+            <button onClick={() => executeImport(false)}
+              className="w-full py-3 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 transition-colors font-medium">
+              覆盖导入（清空原有数据）
+            </button>
+            <button onClick={() => executeImport(true)}
+              className="w-full py-3 border-2 border-indigo-600 text-indigo-600 rounded-xl hover:bg-indigo-50 transition-colors font-medium">
+              合并导入（增加导入数据）
+            </button>
+            <button onClick={() => { setShowImportMode(false); setPendingFile(null); }}
+              className="w-full py-2 text-stone-400 hover:text-stone-600 text-sm transition-colors">
+              取消
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
+    </>
   );
 }
 

@@ -23,10 +23,10 @@ interface ImportResult {
 }
 
 class DataImporter {
-  async importFromZip(file: File): Promise<ImportResult> {
+  async importFromZip(file: File, merge = false): Promise<ImportResult> {
     try {
       const zip = await JSZip.loadAsync(file);
-      
+
       const dataFile = zip.file('data.json');
       if (!dataFile) {
         return {
@@ -36,14 +36,14 @@ class DataImporter {
           importedImages: 0
         };
       }
-      
+
       const dataContent = await dataFile.async('string');
       const data: ImportData = JSON.parse(dataContent);
-      
+
       const imageResults = await this.importImagesFromZip(zip);
-      
-      this.saveDataToStorage(data);
-      
+
+      this.saveDataToStorage(data, merge);
+
       return {
         success: true,
         message: '数据导入成功',
@@ -60,14 +60,14 @@ class DataImporter {
     }
   }
 
-  async importFromJson(file: File, imageFiles?: File[]): Promise<ImportResult> {
+  async importFromJson(file: File, imageFiles?: File[], merge = false): Promise<ImportResult> {
     try {
       const content = await file.text();
       const data: ImportData = JSON.parse(content);
-      
+
       let importedImages = 0;
       const missingImages: string[] = [];
-      
+
       if (imageFiles && imageFiles.length > 0) {
         for (const imgFile of imageFiles) {
           try {
@@ -79,9 +79,9 @@ class DataImporter {
           }
         }
       }
-      
-      this.saveDataToStorage(data);
-      
+
+      this.saveDataToStorage(data, merge);
+
       return {
         success: true,
         message: '数据导入成功',
@@ -133,13 +133,49 @@ class DataImporter {
     return { imported: imported.length, missing };
   }
 
-  private saveDataToStorage(data: ImportData): void {
+  private saveDataToStorage(data: ImportData, merge: boolean): void {
+    if (merge) {
+      this.mergeDataToStorage(data);
+      return;
+    }
     if (data.profile) localStorage.setItem(STORAGE_KEYS.PROFILE, data.profile);
     if (data.quotes) localStorage.setItem(STORAGE_KEYS.QUOTES, data.quotes);
     if (data.gallery) localStorage.setItem(STORAGE_KEYS.GALLERY, data.gallery);
     if (data.moodEntries) localStorage.setItem(STORAGE_KEYS.MOOD_ENTRIES, data.moodEntries);
     if (data.moodTemplates) localStorage.setItem(STORAGE_KEYS.MOOD_TEMPLATES, data.moodTemplates);
     if (data.inventory) localStorage.setItem(STORAGE_KEYS.INVENTORY, data.inventory);
+  }
+
+  private mergeDataToStorage(data: ImportData): void {
+    const arrayFields: Array<{ key: string; field: keyof ImportData }> = [
+      { key: STORAGE_KEYS.QUOTES, field: 'quotes' },
+      { key: STORAGE_KEYS.GALLERY, field: 'gallery' },
+      { key: STORAGE_KEYS.MOOD_ENTRIES, field: 'moodEntries' },
+      { key: STORAGE_KEYS.MOOD_TEMPLATES, field: 'moodTemplates' },
+      { key: STORAGE_KEYS.INVENTORY, field: 'inventory' },
+    ];
+
+    for (const { key, field } of arrayFields) {
+      const imported = data[field];
+      if (!imported) continue;
+      try {
+        const importedArr = JSON.parse(imported) as Array<{ id: string }>;
+        if (!Array.isArray(importedArr)) continue;
+        const existingStr = localStorage.getItem(key);
+        const existingArr: Array<{ id: string }> = existingStr ? JSON.parse(existingStr) : [];
+        if (!Array.isArray(existingArr)) {
+          localStorage.setItem(key, imported);
+          continue;
+        }
+        const importIds = new Set(importedArr.map(i => i.id));
+        const kept = existingArr.filter(i => !importIds.has(i.id));
+        localStorage.setItem(key, JSON.stringify([...importedArr, ...kept]));
+      } catch {
+        localStorage.setItem(key, imported);
+      }
+    }
+
+    // profile: skip in merge mode to preserve existing user info
   }
 
   async validateImportFile(file: File): Promise<{ valid: boolean; message: string }> {
